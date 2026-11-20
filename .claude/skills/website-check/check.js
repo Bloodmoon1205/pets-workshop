@@ -45,6 +45,25 @@ const fs = require('fs');
         links.map(a => decodeURIComponent(a.getAttribute('href'))).join(' ')).match(/\[ناقص[^\]]*\]/g) || [])],
       smallTargets: small.length,
       fontSize: parseFloat(getComputedStyle(document.body).fontSize),
+      emoji: [...document.querySelectorAll('.icon, [class*=icon]')].filter(el => /\p{Extended_Pictographic}/u.test(el.textContent)).length,
+      noHover: !([...document.styleSheets].some(sh => { try { return [...sh.cssRules].some(r => /:hover|:focus-visible/.test(r.selectorText || '')); } catch { return false; } })),
+      lowContrast: (() => {
+        // تباين النص مع الخلفية (المطلوب 4.5، أو 3 للنص الكبير)
+        const rgb = c => (c.match(/[\d.]+/g) || []).map(Number);
+        const lum = ([r, g, b]) => { const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+        const bgOf = el => { for (let e = el; e; e = e.parentElement) { const cs = getComputedStyle(e); if (cs.backgroundImage !== 'none') return null; const c = rgb(cs.backgroundColor); if (c.length === 3 || c[3] > 0) return c.slice(0, 3); } return [255, 255, 255]; };
+        const bad = [];
+        for (const el of document.querySelectorAll('body *')) {
+          if (![...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())) continue;
+          const cs = getComputedStyle(el); const bg = bgOf(el); if (!bg) continue;
+          const a = lum(rgb(cs.color).slice(0, 3)), b = lum(bg);
+          const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+          const size = parseFloat(cs.fontSize), bold = parseInt(cs.fontWeight) >= 700;
+          const need = (size >= 24 || (bold && size >= 18.66)) ? 3 : 4.5;
+          if (ratio < need) bad.push(`"${el.textContent.trim().slice(0, 25)}" ${ratio.toFixed(1)} من ${need}`);
+        }
+        return bad;
+      })(),
     };
   });
 
@@ -63,17 +82,21 @@ const fs = require('fs');
     badWa.length ? `${badWa.length} رابط خربان: ${badWa[0]}` : '');
   add('حجم النص 16px أو أكثر', info.fontSize >= 16, `${info.fontSize}px`);
   add('الأزرار كبيرة كفاية للإصبع (40px)', info.smallTargets === 0, info.smallTargets ? `${info.smallTargets} زر صغير` : '');
+  add('تباين النص كافي (يتقرا في الشمس)', info.lowContrast.length === 0, info.lowContrast.slice(0, 3).join(' | '));
+  add('الأيقونات مو إيموجي', info.emoji === 0, info.emoji ? `${info.emoji} أيقونة إيموجي` : '');
+  add('الأزرار تتغير لما تمر عليها أو توصل لها بالكيبورد', !info.noHover);
   add('ما فيه معلومات ناقصة', info.missing.length === 0, info.missing.join('، '));
   add('ما فيه أخطاء في التحميل', errors.length === 0, errors.slice(0, 3).join(' | '));
 
   // كمبيوتر
   const desk = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
   await desk.goto(url, { waitUntil: 'networkidle' });
+  await desk.screenshot({ path: path.join(outDir, 'desktop-first-screen.png') });
   await desk.screenshot({ path: path.join(outDir, 'desktop.png'), fullPage: true });
   await browser.close();
 
   for (const r of results) console.log(`${r.ok ? '✅' : '❌'} ${r.name}${r.note ? ' — ' + r.note : ''}`);
   const bad = results.filter(r => !r.ok).length;
   console.log(`\n${bad === 0 ? 'كل الفحوصات التلقائية نجحت.' : bad + ' فحص فيه مشكلة.'} الصور في: ${path.resolve(outDir)}`);
-  console.log('تذكير: شوف mobile-first-screen.png وmobile.png وdesktop.png بعينك قبل ما تقول جاهز.');
+  console.log('تذكير: شوف الصور الأربع بعينك (أول شاشة + الصفحة كاملة، للجوال والكمبيوتر) قبل ما تقول جاهز.');
 })();
